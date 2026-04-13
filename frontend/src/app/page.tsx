@@ -14,8 +14,8 @@ type ChatMessage = {
 
 
 export default function Home() {
-  const [model, setModel] = useState<"deepseek-coder:latest" | "llama3.2:1b">(
-    "deepseek-coder:latest"
+  const [model, setModel] = useState<"deepseek-coder:latest" | "llama3.2:1b" | "llama3.1:8b">(
+    "llama3.1:8b"
   );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -32,22 +32,72 @@ export default function Home() {
       content: input.trim(),
     };
     setInput("");
-    setMessages((prev) => [...prev, userMessage]);
+
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setIsSending(true);
 
     try {
       const res = await fetch("http://localhost:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userMessage.content, model }),
+        body: JSON.stringify({
+          messages: updatedMessages.map(m => ({ role: m.role, content: m.content })),
+          model
+        }),
       });
-      const data = await res.json();
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: data.response || data.error || "No response",
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+
+      const assistantMessageId = crypto.randomUUID();
+      // Initialize an empty assistant message
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantMessageId, role: "assistant", content: "" },
+      ]);
+
+      let done = false;
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const parsed = JSON.parse(line);
+                if (parsed.message?.content) {
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, content: msg.content + parsed.message.content }
+                        : msg
+                    )
+                  );
+                } else if (parsed.error) {
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, content: msg.content + "\nError: " + parsed.error }
+                        : msg
+                    )
+                  );
+                }
+              } catch (e) {
+                console.error("Error parsing NDJSON chunk", e);
+              }
+            }
+          }
+          // Scroll dynamically as it streams
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }
+        }
+      }
     } catch (err) {
       setMessages((prev) => [...prev, {
         id: crypto.randomUUID(),
@@ -77,7 +127,7 @@ export default function Home() {
   }, []);
 
   return (
-  <div className="min-h-screen flex flex-col bg-background text-foreground font-fira">
+    <div className="min-h-screen flex flex-col bg-background text-foreground font-fira">
       <header className="w-full border-b border-black/10 dark:border-white/10">
         <div className="w-full px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold tracking-tight text-green-500">Anton</h1>

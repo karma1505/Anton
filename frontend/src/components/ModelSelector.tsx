@@ -6,6 +6,7 @@ import { useState } from "react";
 const AVAILABLE_MODELS = [
   { id: "deepseek-coder:latest", label: "deepseek-coder" },
   { id: "llama3.2:1b", label: "llama3.2:1b" },
+  { id: "llama3.1:8b", label: "llama3.1:8b" },
 ] as const;
 
 type ModelId = typeof AVAILABLE_MODELS[number]["id"];
